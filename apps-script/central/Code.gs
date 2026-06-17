@@ -1,21 +1,35 @@
 // App Central — Loja & Agenda Simples
-// Cliente final: login, assinatura, loja, serviço, despesas e módulos básicos.
+// Cliente final: login, assinatura, loja, serviço, despesas, módulos básicos e agendamento público.
 
 const MASTER_SHEET_ID = 'COLE_AQUI_ID_CLIENTES_MASTER';
 const SESSION_SECONDS = 21600; // 6 horas
 
 function doGet(e) {
-  const clienteId = e && e.parameter && e.parameter.cliente
+  const clientePainel = e && e.parameter && e.parameter.cliente
     ? String(e.parameter.cliente).trim()
     : '';
 
-  if (!clienteId) {
+  const clienteAgendamento = e && e.parameter && e.parameter.agendar
+    ? String(e.parameter.agendar).trim()
+    : '';
+
+  if (clienteAgendamento) {
+    const template = HtmlService.createTemplateFromFile('public_agendamento');
+    template.clienteId = clienteAgendamento;
+
+    return template
+      .evaluate()
+      .setTitle('Agendamento Online')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  if (!clientePainel) {
     return HtmlService
       .createHtmlOutput('<h2>Cliente não informado.</h2><p>Use o link completo do sistema.</p>');
   }
 
   const template = HtmlService.createTemplateFromFile('index');
-  template.clienteId = clienteId;
+  template.clienteId = clientePainel;
 
   return template
     .evaluate()
@@ -104,6 +118,162 @@ function getHomeData(token) {
   }
 
   return getHomeServico_(ctx.ss, ctx.cliente, config);
+}
+
+// =========================
+// AGENDAMENTO PÚBLICO
+// =========================
+
+function getDadosAgendamentoPublico(clienteId) {
+  const cliente = getClienteById_(clienteId);
+  validarAcessoCliente_(cliente);
+
+  if (cliente.tipo !== 'SERVICO') {
+    throw new Error('Este link é exclusivo para prestadores de serviço.');
+  }
+
+  const ss = SpreadsheetApp.openById(cliente.sheetId);
+  const config = lerConfig_(ss);
+  const aceita = String(config.ACEITA_AGENDAMENTO_PUBLICO || 'SIM').toUpperCase();
+
+  if (aceita !== 'SIM') {
+    throw new Error('Agendamento online indisponível no momento.');
+  }
+
+  const servicos = getRows_(ss, 'Servicos')
+    .filter(r => isAtivo_(r[6]))
+    .map(r => ({
+      id: r[0],
+      nome: r[1],
+      categoria: r[2],
+      duracao: Number(r[3] || 0),
+      preco: Number(r[4] || 0)
+    }));
+
+  return {
+    sucesso: true,
+    cliente: {
+      id: cliente.id,
+      nomeEmpresa: cliente.nomeEmpresa,
+      responsavel: cliente.responsavel,
+      telefone: cliente.telefone
+    },
+    config: {
+      chavePix: config.CHAVE_PIX || '',
+      nomeRecebedorPix: config.NOME_RECEBEDOR_PIX || cliente.nomeEmpresa,
+      whatsappPrestador: config.WHATSAPP_PRESTADOR || cliente.telefone || '',
+      mensagemPosAgendamento: config.MENSAGEM_POS_AGENDAMENTO || 'Obrigado pelo agendamento!'
+    },
+    servicos
+  };
+}
+
+function salvarAgendamentoPublico(clienteId, payload) {
+  const cliente = getClienteById_(clienteId);
+  validarAcessoCliente_(cliente);
+
+  if (cliente.tipo !== 'SERVICO') {
+    throw new Error('Este link é exclusivo para prestadores de serviço.');
+  }
+
+  if (!payload || !payload.cliente) throw new Error('Informe seu nome.');
+  if (!payload.telefone) throw new Error('Informe seu WhatsApp.');
+  if (!payload.servicoId) throw new Error('Escolha um serviço.');
+  if (!payload.data) throw new Error('Escolha uma data.');
+  if (!payload.hora) throw new Error('Escolha um horário.');
+
+  const ss = SpreadsheetApp.openById(cliente.sheetId);
+  const config = lerConfig_(ss);
+  const aceita = String(config.ACEITA_AGENDAMENTO_PUBLICO || 'SIM').toUpperCase();
+
+  if (aceita !== 'SIM') {
+    throw new Error('Agendamento online indisponível no momento.');
+  }
+
+  const servicos = getRows_(ss, 'Servicos');
+  const servico = servicos.find(r => String(r[0]) === String(payload.servicoId) && isAtivo_(r[6]));
+
+  if (!servico) {
+    throw new Error('Serviço não encontrado ou indisponível.');
+  }
+
+  const dataAgendada = new Date(payload.data);
+  const conflito = getRows_(ss, 'Agenda').some(r => {
+    const mesmoDia = mesmaData_(r[1], dataAgendada);
+    const mesmaHora = String(r[2]) === String(payload.hora);
+    const status = String(r[7] || '').toUpperCase();
+    const horarioLivre = status === 'CANCELADO' || status === 'FALTOU';
+
+    return mesmoDia && mesmaHora && !horarioLivre;
+  });
+
+  if (conflito) {
+    throw new Error('Este horário não está disponível. Escolha outro horário.');
+  }
+
+  const valor = Number(payload.valor || servico[4] || 0);
+  const formaPagamento = payload.formaPagamento || 'Pix';
+  const id = Utilities.getUuid();
+
+  ss.getSheetByName('Agenda').appendRow([
+    id,
+    dataAgendada,
+    payload.hora,
+    payload.cliente,
+    payload.telefone,
+    payload.servicoId,
+    valor,
+    'Agendado',
+    'Pendente',
+    formaPagamento,
+    'Agendamento feito pelo link público. ' + (payload.observacao || ''),
+    'NAO'
+  ]);
+
+  registrarClienteSimples_(ss, payload.cliente, payload.telefone);
+
+  const mensagem = montarMensagemAgendamentoPublico_(cliente, config, {
+    cliente: payload.cliente,
+    telefone: payload.telefone,
+    servico: servico[1],
+    data: formatarData_(dataAgendada),
+    hora: payload.hora,
+    valor,
+    formaPagamento
+  });
+
+  return {
+    sucesso: true,
+    agendamentoId: id,
+    servico: servico[1],
+    data: formatarData_(dataAgendada),
+    hora: payload.hora,
+    valor,
+    formaPagamento,
+    pix: {
+      chave: config.CHAVE_PIX || '',
+      nomeRecebedor: config.NOME_RECEBEDOR_PIX || cliente.nomeEmpresa
+    },
+    whatsappPrestador: gerarWhatsappMensagem_(config.WHATSAPP_PRESTADOR || cliente.telefone, mensagem)
+  };
+}
+
+function montarMensagemAgendamentoPublico_(cliente, config, dados) {
+  return [
+    'Olá! Fiz um agendamento pelo link.',
+    '',
+    'Nome: ' + dados.cliente,
+    'WhatsApp: ' + dados.telefone,
+    'Serviço: ' + dados.servico,
+    'Data: ' + dados.data,
+    'Hora: ' + dados.hora,
+    'Valor: ' + moeda_(dados.valor),
+    'Pagamento: ' + dados.formaPagamento,
+    '',
+    dados.formaPagamento === 'Pix' || dados.formaPagamento === 'PIX'
+      ? 'Se for Pix, vou enviar o comprovante por aqui.'
+      : 'Aguardo confirmação.'
+  ].join('\n');
 }
 
 // =========================
@@ -256,17 +426,11 @@ function salvarVenda(token, payload) {
     'Venda registrada no app'
   ]);
 
-  produtosSheet.getRange(idx + 1, 10).setValue(estoqueAtual - quantidade); // coluna Estoque
+  produtosSheet.getRange(idx + 1, 10).setValue(estoqueAtual - quantidade);
 
   registrarClienteSimples_(ctx.ss, payload.cliente, payload.telefone);
 
-  return {
-    sucesso: true,
-    vendaId,
-    produto: montarNomeProduto_(produto),
-    valorPago,
-    lucro
-  };
+  return { sucesso: true, vendaId, produto: montarNomeProduto_(produto), valorPago, lucro };
 }
 
 function getVendas(token) {
@@ -301,14 +465,7 @@ function getProdutosCriticos(token) {
   return getRows_(ctx.ss, 'Produtos')
     .filter(r => isAtivo_(r[11]))
     .filter(r => Number(r[9] || 0) <= Number(r[10] || 0))
-    .map(r => ({
-      id: r[0],
-      nome: r[3],
-      cor: r[5],
-      tamanho: r[6],
-      estoque: Number(r[9] || 0),
-      estoqueMin: Number(r[10] || 0)
-    }))
+    .map(r => ({ id: r[0], nome: r[3], cor: r[5], tamanho: r[6], estoque: Number(r[9] || 0), estoqueMin: Number(r[10] || 0) }))
     .slice(0, 20);
 }
 
@@ -322,15 +479,7 @@ function getServicos(token) {
 
   return getRows_(ctx.ss, 'Servicos')
     .filter(r => isAtivo_(r[6]))
-    .map(r => ({
-      id: r[0],
-      nome: r[1],
-      categoria: r[2],
-      duracao: Number(r[3] || 0),
-      preco: Number(r[4] || 0),
-      custo: Number(r[5] || 0),
-      ativo: r[6]
-    }));
+    .map(r => ({ id: r[0], nome: r[1], categoria: r[2], duracao: Number(r[3] || 0), preco: Number(r[4] || 0), custo: Number(r[5] || 0), ativo: r[6] }));
 }
 
 function salvarServico(token, payload) {
@@ -341,15 +490,7 @@ function salvarServico(token, payload) {
 
   const id = Utilities.getUuid();
 
-  ctx.ss.getSheetByName('Servicos').appendRow([
-    id,
-    payload.nome,
-    payload.categoria || '',
-    Number(payload.duracao || 60),
-    Number(payload.preco || 0),
-    Number(payload.custo || 0),
-    true
-  ]);
+  ctx.ss.getSheetByName('Servicos').appendRow([id, payload.nome, payload.categoria || '', Number(payload.duracao || 60), Number(payload.preco || 0), Number(payload.custo || 0), true]);
 
   return { sucesso: true, id };
 }
@@ -392,11 +533,7 @@ function getAgenda(token) {
   const servicosMap = {};
   getRows_(ctx.ss, 'Servicos').forEach(s => servicosMap[String(s[0])] = s[1]);
 
-  return getRows_(ctx.ss, 'Agenda')
-    .slice()
-    .reverse()
-    .slice(0, 100)
-    .map(r => mapAgenda_(r, servicosMap));
+  return getRows_(ctx.ss, 'Agenda').slice().reverse().slice(0, 100).map(r => mapAgenda_(r, servicosMap));
 }
 
 function getAgendaHoje(token) {
@@ -424,7 +561,7 @@ function atualizarPagamentoAgendamento(token, agendaId, statusPagamento) {
 
   if (idx < 1) throw new Error('Agendamento não encontrado.');
 
-  sheet.getRange(idx + 1, 9).setValue(statusPagamento); // StatusPagamento
+  sheet.getRange(idx + 1, 9).setValue(statusPagamento);
 
   return { sucesso: true };
 }
@@ -438,11 +575,7 @@ function getContexto_(token) {
   const cliente = getClienteById_(sessao.clienteId);
   validarAcessoCliente_(cliente);
 
-  return {
-    sessao,
-    cliente,
-    ss: SpreadsheetApp.openById(cliente.sheetId)
-  };
+  return { sessao, cliente, ss: SpreadsheetApp.openById(cliente.sheetId) };
 }
 
 function getClienteById_(clienteId) {
@@ -473,9 +606,7 @@ function encontrarLinhaCliente_(clienteId) {
   const rows = sheet.getDataRange().getValues();
 
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(clienteId)) {
-      return { rowIndex: i + 1, row: rows[i] };
-    }
+    if (String(rows[i][0]) === String(clienteId)) return { rowIndex: i + 1, row: rows[i] };
   }
 
   throw new Error('Cliente não encontrado.');
@@ -490,9 +621,7 @@ function validarAcessoCliente_(cliente) {
     const hoje = zerarHora_(new Date());
     const venc = zerarHora_(new Date(cliente.vencimento));
 
-    if (venc < hoje) {
-      throw new Error('Assinatura vencida. Entre em contato para regularizar.');
-    }
+    if (venc < hoje) throw new Error('Assinatura vencida. Entre em contato para regularizar.');
   }
 }
 
@@ -519,23 +648,15 @@ function getHomeLoja_(ss, cliente, config) {
   const produtos = getRows_(ss, 'Produtos');
   const vendas = getRows_(ss, 'Vendas');
   const despesas = getRows_(ss, 'Despesas');
-
   const hoje = new Date();
-  let vendasHoje = 0;
-  let vendasMes = 0;
-  let lucroMes = 0;
-  let despesasMes = 0;
+  let vendasHoje = 0, vendasMes = 0, lucroMes = 0, despesasMes = 0;
 
   vendas.forEach(v => {
     const data = new Date(v[1]);
     const valor = Number(v[6] || 0);
     const lucro = Number(v[11] || 0);
-
     if (mesmaData_(data, hoje)) vendasHoje += valor;
-    if (mesmoMes_(data, hoje)) {
-      vendasMes += valor;
-      lucroMes += lucro;
-    }
+    if (mesmoMes_(data, hoje)) { vendasMes += valor; lucroMes += lucro; }
   });
 
   despesas.forEach(d => {
@@ -566,20 +687,14 @@ function getHomeServico_(ss, cliente, config) {
   const agenda = getRows_(ss, 'Agenda');
   const servicos = getRows_(ss, 'Servicos');
   const despesas = getRows_(ss, 'Despesas');
-
   const hoje = new Date();
-  let agendaHoje = 0;
-  let receitaMes = 0;
-  let pendenteMes = 0;
-  let despesasMes = 0;
+  let agendaHoje = 0, receitaMes = 0, pendenteMes = 0, despesasMes = 0;
 
   agenda.forEach(a => {
     const data = new Date(a[1]);
     const valor = Number(a[6] || 0);
     const pagamento = String(a[8]).toUpperCase();
-
     if (mesmaData_(data, hoje)) agendaHoje++;
-
     if (mesmoMes_(data, hoje)) {
       if (pagamento === 'PAGO') receitaMes += valor;
       if (pagamento !== 'PAGO') pendenteMes += valor;
@@ -611,23 +726,14 @@ function getHomeServico_(ss, cliente, config) {
 // =========================
 
 function dadosBasicosCliente_(cliente) {
-  return {
-    id: cliente.id,
-    tipo: cliente.tipo,
-    nomeEmpresa: cliente.nomeEmpresa,
-    responsavel: cliente.responsavel,
-    status: cliente.status,
-    vencimento: formatarData_(cliente.vencimento)
-  };
+  return { id: cliente.id, tipo: cliente.tipo, nomeEmpresa: cliente.nomeEmpresa, responsavel: cliente.responsavel, status: cliente.status, vencimento: formatarData_(cliente.vencimento) };
 }
 
 function lerConfig_(ss) {
   const sheet = ss.getSheetByName('Config');
   if (!sheet) return {};
-
   const rows = sheet.getDataRange().getValues();
   const cfg = {};
-
   rows.slice(1).forEach(r => cfg[String(r[0])] = r[1]);
   return cfg;
 }
@@ -635,7 +741,6 @@ function lerConfig_(ss) {
 function getRows_(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) return [];
-
   const values = sheet.getDataRange().getValues();
   return values.length > 1 ? values.slice(1) : [];
 }
@@ -652,37 +757,22 @@ function montarNomeProduto_(r) {
 function calcularTaxa_(ss, formaPagamento, valor) {
   const cfg = lerConfig_(ss);
   const f = String(formaPagamento || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
   if (f.includes('CREDITO')) return Number(valor || 0) * Number(cfg.TAXA_CREDITO || 0);
   if (f.includes('DEBITO')) return Number(valor || 0) * Number(cfg.TAXA_DEBITO || 0);
-
   return 0;
 }
 
 function registrarClienteSimples_(ss, nome, telefone) {
   if (!nome && !telefone) return;
-
   const sheet = ss.getSheetByName('Clientes');
   if (!sheet) return;
-
   const rows = sheet.getDataRange().getValues();
   const tel = String(telefone || '').replace(/\D/g, '');
-
   const existe = rows.slice(1).some(r => {
     const t = String(r[2] || '').replace(/\D/g, '');
     return tel && t === tel;
   });
-
-  if (!existe) {
-    sheet.appendRow([
-      Utilities.getUuid(),
-      nome || '',
-      telefone || '',
-      '',
-      '',
-      new Date()
-    ]);
-  }
+  if (!existe) sheet.appendRow([Utilities.getUuid(), nome || '', telefone || '', '', '', new Date()]);
 }
 
 function mapAgenda_(r, servicosMap) {
@@ -708,19 +798,14 @@ function mesmaData_(a, b) {
   if (!a || !b) return false;
   const da = new Date(a);
   const db = new Date(b);
-
-  return da.getFullYear() === db.getFullYear()
-    && da.getMonth() === db.getMonth()
-    && da.getDate() === db.getDate();
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
 }
 
 function mesmoMes_(a, b) {
   if (!a || !b) return false;
   const da = new Date(a);
   const db = new Date(b);
-
-  return da.getFullYear() === db.getFullYear()
-    && da.getMonth() === db.getMonth();
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth();
 }
 
 function zerarHora_(d) {
@@ -751,7 +836,12 @@ function moeda_(valor) {
 function gerarWhatsapp_(telefone) {
   const n = String(telefone || '').replace(/\D/g, '');
   if (!n) return '';
-
   const final = n.length <= 11 ? '55' + n : n;
   return 'https://wa.me/' + final;
+}
+
+function gerarWhatsappMensagem_(telefone, mensagem) {
+  const base = gerarWhatsapp_(telefone);
+  if (!base) return '';
+  return base + '?text=' + encodeURIComponent(mensagem || '');
 }
