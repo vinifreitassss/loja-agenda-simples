@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Loja & Agenda Simples</title>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+  <div id="loading" class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <div class="text-2xl font-bold">Carregando...</div>
+      <p class="text-slate-500">Aguarde um instante.</p>
+    </div>
+  </div>
+
+  <main id="loginPage" class="hidden min-h-screen flex items-center justify-center p-6">
+    <section class="bg-white rounded-3xl shadow-sm border w-full max-w-md p-8">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold">Entrar no sistema</h1>
+        <p class="text-slate-500 mt-2">Acesse com o usuário e a senha temporária recebidos.</p>
+      </div>
+
+      <div class="space-y-4">
+        <input id="usuario" class="input" placeholder="Usuário">
+        <input id="senha" class="input" type="password" placeholder="Senha">
+      </div>
+
+      <button onclick="login()" class="primary-btn w-full mt-6">Entrar</button>
+      <p id="loginErro" class="text-red-600 text-sm mt-4"></p>
+    </section>
+  </main>
+
+  <main id="trocarSenhaPage" class="hidden min-h-screen flex items-center justify-center p-6">
+    <section class="bg-white rounded-3xl shadow-sm border w-full max-w-md p-8">
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold">Troque sua senha</h1>
+        <p class="text-slate-500 mt-2">Este passo é obrigatório no primeiro acesso.</p>
+      </div>
+
+      <div class="space-y-4">
+        <input id="novaSenha" class="input" type="password" placeholder="Nova senha">
+        <input id="novaSenhaConfirmar" class="input" type="password" placeholder="Confirmar nova senha">
+      </div>
+
+      <button onclick="trocarSenha()" class="primary-btn w-full mt-6">Salvar nova senha</button>
+      <p id="trocarSenhaErro" class="text-red-600 text-sm mt-4"></p>
+    </section>
+  </main>
+
+  <main id="appPage" class="hidden">
+    <header class="bg-white border-b sticky top-0 z-20">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+        <div>
+          <h1 id="empresaNome" class="text-2xl font-bold">Empresa</h1>
+          <p id="empresaSub" class="text-slate-500 text-sm"></p>
+        </div>
+        <button onclick="logout()" class="secondary-btn">Sair</button>
+      </div>
+    </header>
+
+    <div class="max-w-7xl mx-auto p-6">
+      <section class="mb-8">
+        <h2 id="homeTitulo" class="text-3xl font-bold mb-2">Painel</h2>
+        <p id="homeMensagem" class="text-slate-500"></p>
+      </section>
+
+      <section id="cards" class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8"></section>
+
+      <section id="areaLoja" class="hidden grid lg:grid-cols-2 gap-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-5">
+            <h3 class="text-xl font-bold">Estoque crítico</h3>
+            <button onclick="carregarProdutosCriticos()" class="secondary-btn">Atualizar</button>
+          </div>
+          <div id="produtosCriticos" class="space-y-3 text-sm"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="text-xl font-bold mb-4">Próximos módulos</h3>
+          <div class="space-y-3 text-slate-600">
+            <p>Vendas</p>
+            <p>Produtos</p>
+            <p>Despesas</p>
+            <p>Caixa</p>
+            <p>Comprovante WhatsApp</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="areaServico" class="hidden grid lg:grid-cols-2 gap-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-5">
+            <h3 class="text-xl font-bold">Agenda de hoje</h3>
+            <button onclick="carregarAgendaHoje()" class="secondary-btn">Atualizar</button>
+          </div>
+          <div id="agendaHoje" class="space-y-3 text-sm"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="text-xl font-bold mb-4">Legenda</h3>
+          <div class="space-y-3">
+            <p><span class="dot bg-emerald-500"></span> Pago</p>
+            <p><span class="dot bg-red-500"></span> Pendente</p>
+            <p><span class="dot bg-amber-500"></span> Parcial / sinal pago</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <style>
+    .input{
+      width:100%;
+      border:1px solid #cbd5e1;
+      border-radius:16px;
+      padding:14px 16px;
+      outline:none;
+      background:white;
+    }
+    .input:focus{
+      border-color:#0f172a;
+      box-shadow:0 0 0 4px rgba(15,23,42,.08);
+    }
+    .primary-btn{
+      background:#0f172a;
+      color:white;
+      border-radius:16px;
+      padding:12px 18px;
+      font-weight:800;
+    }
+    .secondary-btn{
+      background:#f1f5f9;
+      color:#0f172a;
+      border-radius:14px;
+      padding:10px 14px;
+      font-weight:700;
+    }
+    .card{
+      background:white;
+      border:1px solid #e2e8f0;
+      border-radius:24px;
+      padding:24px;
+      box-shadow:0 1px 2px rgba(15,23,42,.04);
+    }
+    .card-label{
+      color:#64748b;
+      font-size:13px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+    .card-value{
+      margin-top:8px;
+      font-size:26px;
+      font-weight:900;
+      color:#0f172a;
+    }
+    .dot{
+      display:inline-block;
+      width:12px;
+      height:12px;
+      border-radius:50%;
+      margin-right:8px;
+    }
+  </style>
+
+  <script>
+    const CLIENTE_ID = '<?= clienteId ?>';
+    let token = sessionStorage.getItem('las_token') || '';
+    let clienteAtual = null;
+
+    window.onload = () => {
+      if(token){
+        carregarHome();
+      }else{
+        show('loginPage');
+      }
+    };
+
+    function show(id){
+      ['loading','loginPage','trocarSenhaPage','appPage'].forEach(p=>{
+        document.getElementById(p).classList.add('hidden');
+      });
+      document.getElementById(id).classList.remove('hidden');
+    }
+
+    function login(){
+      loginErro.innerText = '';
+      show('loading');
+
+      google.script.run
+        .withSuccessHandler((res)=>{
+          token = res.token;
+          clienteAtual = res.cliente;
+          sessionStorage.setItem('las_token', token);
+
+          if(res.trocarSenha){
+            show('trocarSenhaPage');
+          }else{
+            carregarHome();
+          }
+        })
+        .withFailureHandler((e)=>{
+          show('loginPage');
+          loginErro.innerText = e.message;
+        })
+        .loginCliente(CLIENTE_ID, usuario.value, senha.value);
+    }
+
+    function trocarSenha(){
+      trocarSenhaErro.innerText = '';
+
+      if(novaSenha.value !== novaSenhaConfirmar.value){
+        trocarSenhaErro.innerText = 'As senhas não conferem.';
+        return;
+      }
+
+      show('loading');
+
+      google.script.run
+        .withSuccessHandler(()=> carregarHome())
+        .withFailureHandler((e)=>{
+          show('trocarSenhaPage');
+          trocarSenhaErro.innerText = e.message;
+        })
+        .trocarSenhaPrimeiroAcesso(token, novaSenha.value);
+    }
+
+    function carregarHome(){
+      show('loading');
+
+      google.script.run
+        .withSuccessHandler(renderHome)
+        .withFailureHandler((e)=>{
+          sessionStorage.removeItem('las_token');
+          token = '';
+          show('loginPage');
+          loginErro.innerText = e.message;
+        })
+        .getHomeData(token);
+    }
+
+    function renderHome(data){
+      clienteAtual = data.cliente;
+      empresaNome.innerText = data.cliente.nomeEmpresa;
+      empresaSub.innerText = `${data.cliente.tipo} • vencimento ${data.cliente.vencimento || '-'}`;
+      homeTitulo.innerText = data.tipo === 'LOJA' ? 'Painel da loja' : 'Painel da agenda';
+      homeMensagem.innerText = data.mensagem;
+
+      cards.innerHTML = '';
+      data.cards.forEach(c=>{
+        cards.innerHTML += `
+          <div class="card">
+            <p class="card-label">${c.label}</p>
+            <h3 class="card-value">${c.value}</h3>
+          </div>
+        `;
+      });
+
+      areaLoja.classList.toggle('hidden', data.tipo !== 'LOJA');
+      areaServico.classList.toggle('hidden', data.tipo !== 'SERVICO');
+
+      show('appPage');
+
+      if(data.tipo === 'LOJA') carregarProdutosCriticos();
+      if(data.tipo === 'SERVICO') carregarAgendaHoje();
+    }
+
+    function carregarProdutosCriticos(){
+      produtosCriticos.innerHTML = 'Carregando...';
+
+      google.script.run
+        .withSuccessHandler((items)=>{
+          if(!items.length){
+            produtosCriticos.innerHTML = '<p class="text-slate-500">Nenhum produto crítico.</p>';
+            return;
+          }
+
+          produtosCriticos.innerHTML = items.map(p=>`
+            <div class="p-4 rounded-2xl bg-red-50 border border-red-100">
+              <b>${p.nome}</b><br>
+              ${p.cor || ''} ${p.tamanho || ''}<br>
+              Estoque: ${p.estoque} / mínimo: ${p.estoqueMin}
+            </div>
+          `).join('');
+        })
+        .withFailureHandler((e)=> produtosCriticos.innerHTML = e.message)
+        .getProdutosCriticos(token);
+    }
+
+    function carregarAgendaHoje(){
+      agendaHoje.innerHTML = 'Carregando...';
+
+      google.script.run
+        .withSuccessHandler((items)=>{
+          if(!items.length){
+            agendaHoje.innerHTML = '<p class="text-slate-500">Nenhum agendamento para hoje.</p>';
+            return;
+          }
+
+          agendaHoje.innerHTML = items.map(a=>{
+            const classe = corPagamento(a.statusPagamento);
+            const zap = a.whatsapp ? `<a href="${a.whatsapp}" target="_blank" class="text-blue-700 font-bold">WhatsApp</a>` : '';
+            return `
+              <div class="p-4 rounded-2xl border ${classe}">
+                <div class="flex justify-between gap-3">
+                  <div>
+                    <b>${a.hora} — ${a.cliente}</b><br>
+                    ${a.servico} • ${moeda(a.valor)}<br>
+                    Pagamento: <b>${a.statusPagamento || '-'}</b>
+                  </div>
+                  <div>${zap}</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        })
+        .withFailureHandler((e)=> agendaHoje.innerHTML = e.message)
+        .getAgendaHoje(token);
+    }
+
+    function corPagamento(status){
+      const s = String(status || '').toUpperCase();
+      if(s === 'PAGO') return 'bg-emerald-50 border-emerald-200';
+      if(s === 'PENDENTE') return 'bg-red-50 border-red-200';
+      return 'bg-amber-50 border-amber-200';
+    }
+
+    function moeda(v){
+      return Number(v || 0).toLocaleString('pt-BR', {
+        style:'currency',
+        currency:'BRL'
+      });
+    }
+
+    function logout(){
+      google.script.run.logoutCliente(token);
+      sessionStorage.removeItem('las_token');
+      token = '';
+      show('loginPage');
+    }
+  </script>
+</body>
+</html>
